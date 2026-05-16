@@ -70,6 +70,7 @@ function initializeProject(projectName) {
         'number-converter': initNumberConverter,
         'typing-speed-tester': initTypingSpeedTester,
         'snake-game': initSnakeGame,
+        'password-forge': initPasswordForge, // Register Password Forge initializer
         'spot-the-difference': initSpotTheDifference,
         'whack-a-mole': initWhackaMole,
         '2048-game': init2048Game,
@@ -7166,16 +7167,31 @@ function getPasswordForgeHTML() {
 }
 
 function initPasswordForge() {
-    const checkBtn = document.getElementById('checkPasswordBtn');
+    const checkBtn = document.getElementById("checkPasswordBtn");
+    const passwordInput = document.getElementById("passwordInput");
+    const result = document.getElementById("passwordResult");
+    const rulesContainer = document.getElementById("rulesContainer");
 
-    checkBtn.addEventListener('click', () => {
-        const password = document.getElementById('passwordInput').value;
-        const result = document.getElementById('passwordResult');
+    if (!checkBtn) return;
+
+    checkBtn.addEventListener("click", () => {
+        const password = passwordInput.value;
+        if (!password.trim()) {
+            result.textContent = "⚠️ Please enter a password";
+            return;
+        }
 
         const hasLength = password.length >= 8;
         const hasNumber = /\d/.test(password);
         const hasUpper = /[A-Z]/.test(password);
         const hasSpecial = /[!@#$%^&*]/.test(password);
+
+        rulesContainer.innerHTML = `
+            <p>${hasLength ? "✅" : "❌"} Must contain at least 8 characters</p>
+            <p>${hasNumber ? "✅" : "❌"} Must contain a number</p>
+            <p>${hasUpper ? "✅" : "❌"} Must contain an uppercase letter</p>
+            <p>${hasSpecial ? "✅" : "❌"} Must contain a special character</p>
+        `;
 
         if (hasLength && hasNumber && hasUpper && hasSpecial) {
             result.textContent = "✅ Strong Password!";
