@@ -2883,23 +2883,20 @@ body.sidebar-active .hero-controls {
   }
 }
 
-.modal-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--bg-glass);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 1.2rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--duration-fast) ease;
-  z-index: 10;
+..modal-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10001;
+    background: var(--danger-color);
+    color: var(--on-accent);
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: var(--transition);
 }
 
 .modal-close:hover {
