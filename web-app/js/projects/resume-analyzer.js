@@ -68,14 +68,40 @@ function initAIResumeAnalyzer() {
 
     if (!analyzeBtn || !resumeInput) return;
 
-    // ── Skill list (mirrored from Python script) ──────────────────
+    function loadPdfJs() {
+        return new Promise((resolve, reject) => {
+            if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+            script.onload = () => {
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+                    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                resolve(window.pdfjsLib);
+            };
+            script.onerror = () => reject(new Error('Failed to load PDF.js'));
+            document.head.appendChild(script);
+        });
+    }
+
+    async function readPdfAsText(file) {
+        const pdfjsLib = await loadPdfJs();
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pageTexts = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            pageTexts.push(content.items.map(item => item.str).join(' '));
+        }
+        return pageTexts.join('\n');
+    }
+
     const SKILLS = [
         "python", "java", "c++", "c#", ".net", "django", "sql",
         "machine learning", "html", "css", "javascript",
         "communication", "teamwork"
     ];
 
-    // Aliases → canonical skill name
     const ALIASES = {
         "py":         "python",
         "js":         "javascript",
@@ -96,24 +122,20 @@ function initAIResumeAnalyzer() {
         "github":     "git",
     };
 
-    // Section regex (mirrored from Python)
     const EDU_RE     = /education|academic|qualification/i;
     const EXP_RE     = /experience|internship|work experience/i;
     const PROJ_RE    = /projects?/i;
 
-    // ── File-selection feedback ───────────────────────────────────
     resumeInput.addEventListener('change', () => {
         const file = resumeInput.files[0];
         if (!file) return;
 
-        // Visual feedback
         fileStatus.textContent = `✅ File selected: ${file.name}`;
         fileStatus.style.color = 'var(--accent)';
         uploadIcon.style.color = 'var(--accent)';
         uploadIcon.className   = 'fa-solid fa-circle-check resume-upload-icon';
     });
 
-    // ── Drag-and-drop support ─────────────────────────────────────
     const dropZone = document.getElementById('resumeDropZone');
     if (dropZone) {
         dropZone.addEventListener('dragover', e => {
@@ -128,7 +150,6 @@ function initAIResumeAnalyzer() {
             dropZone.style.borderColor = '';
             const file = e.dataTransfer.files[0];
             if (file) {
-                // Assign to the input so the rest of the flow works
                 const dt = new DataTransfer();
                 dt.items.add(file);
                 resumeInput.files = dt.files;
@@ -139,8 +160,7 @@ function initAIResumeAnalyzer() {
         });
     }
 
-    // ── Main analysis ─────────────────────────────────────────────
-    analyzeBtn.addEventListener('click', () => {
+    analyzeBtn.addEventListener('click', async () => {
         if (!resumeInput.files.length) {
             fileStatus.textContent = '⚠️ Please upload a resume file first!';
             fileStatus.style.color = 'var(--danger-color, #ef4444)';
@@ -150,47 +170,52 @@ function initAIResumeAnalyzer() {
         const file = resumeInput.files[0];
         const ext  = file.name.split('.').pop().toLowerCase();
 
-        // PDFs and binary docs can't be read as plain text in the browser.
-        // Show a clear message rather than silently fail.
-        if (ext === 'pdf' || ext === 'doc' || ext === 'docx') {
-            analyzeBtn.textContent = 'Analyzing… ⏳';
-            analyzeBtn.disabled = true;
-
-            readFileAsText(file)
-                .then(text => {
-                    // PDF/DOCX raw bytes usually look garbled but may still
-                    // contain readable ASCII keywords – try it.
-                    if (!text || text.trim().length < 30) {
-                        showBinaryFallback(file.name, ext);
-                    } else {
-                        runAnalysis(text);
-                    }
-                })
-                .catch(() => showBinaryFallback(file.name, ext))
-                .finally(() => {
-                    analyzeBtn.textContent = 'Analyze Resume 🚀';
-                    analyzeBtn.disabled = false;
-                });
-            return;
-        }
-
-        // .txt → read directly
         analyzeBtn.textContent = 'Analyzing… ⏳';
         analyzeBtn.disabled = true;
 
-        readFileAsText(file)
-            .then(text => runAnalysis(text))
-            .catch(() => {
-                fileStatus.textContent = '❌ Could not read file. Please try a .txt file.';
-                fileStatus.style.color = 'var(--danger-color, #ef4444)';
-            })
-            .finally(() => {
-                analyzeBtn.textContent = 'Analyze Resume 🚀';
-                analyzeBtn.disabled = false;
-            });
+        try {
+            let text = '';
+
+            if (ext === 'pdf') {
+                fileStatus.textContent = '📄 Extracting text from PDF…';
+                fileStatus.style.color = 'var(--accent)';
+                text = await readPdfAsText(file);
+                //console.log(`[ResumeAnalyzer] PDF extracted (${text.length} chars):`, text);
+                if (!text || text.trim().length < 30) {
+                    console.warn('[ResumeAnalyzer] Text too short — likely a scanned/image PDF.');
+                    fileStatus.textContent =
+                        `⚠️ "${file.name}" appears to be a scanned/image-only PDF. ` +
+                        `For best results, export your resume as a text-based PDF or .txt file.`;
+                    fileStatus.style.color = 'var(--warning-color, #f59e0b)';
+                    return;
+                }
+            } else if (ext === 'doc' || ext === 'docx') {
+                text = await readFileAsText(file);
+                //console.log(`[ResumeAnalyzer] DOCX raw text (${text.length} chars):`, text);
+                if (!text || text.trim().length < 30) {
+                    console.warn('[ResumeAnalyzer] DOCX text too short — binary file.');
+                    fileStatus.textContent =
+                        `⚠️ "${file.name}" could not be read as plain text in the browser. ` +
+                        `For best results, export your resume as a .pdf or .txt file and re-upload.`;
+                    fileStatus.style.color = 'var(--warning-color, #f59e0b)';
+                    return;
+                }
+            } else {
+                text = await readFileAsText(file);
+                //console.log(`[ResumeAnalyzer] TXT extracted (${text.length} chars):`, text);
+            }
+
+            //console.log('[ResumeAnalyzer] Running analysis on text:', text);
+            runAnalysis(text);
+        } catch (err) {
+            fileStatus.textContent = `❌ Could not read file: ${err.message}`;
+            fileStatus.style.color = 'var(--danger-color, #ef4444)';
+        } finally {
+            analyzeBtn.textContent = 'Analyze Resume 🚀';
+            analyzeBtn.disabled = false;
+        }
     });
 
-    // ── Read file as text ─────────────────────────────────────────
     function readFileAsText(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -200,42 +225,27 @@ function initAIResumeAnalyzer() {
         });
     }
 
-    // ── Fallback UI for binary files ──────────────────────────────
-    function showBinaryFallback(filename, ext) {
-        fileStatus.textContent =
-            `⚠️ "${filename}" could not be read as plain text in the browser. ` +
-            `For best results, export your resume as a .txt file and re-upload.`;
-        fileStatus.style.color = 'var(--warning-color, #f59e0b)';
-    }
-
-    // ── Core analysis (JS port of AI-Resume-Analyzer.py) ─────────
     function runAnalysis(rawText) {
         const text = rawText.toLowerCase();
 
-        // Tokenise: keep alphanumeric tokens plus "c++" / "c#" / ".net"
         const tokenRe = /c\+\+|c#|\.net|[a-z0-9]+/gi;
         const tokens  = (text.match(tokenRe) || []).map(t => t.toLowerCase());
 
-        // Normalise aliases
         const normalised = tokens.map(t => ALIASES[t] ?? t);
 
-        // Build bigrams from normalised tokens
         const bigrams = [];
         for (let i = 0; i < normalised.length - 1; i++) {
             bigrams.push(normalised[i] + ' ' + normalised[i + 1]);
         }
 
-        // Detect skills
         const foundSkills = SKILLS.filter(
             skill => normalised.includes(skill) || bigrams.includes(skill)
         );
 
-        // Detect sections
         const eduFound  = EDU_RE.test(text);
         const expFound  = EXP_RE.test(text);
         const projFound = PROJ_RE.test(text);
 
-        // ── Score (identical formula to Python script) ────────────
         let score = 0;
         score += Math.min(foundSkills.length * 8, 40); // up to 40
         if (eduFound)              score += 20;
@@ -244,7 +254,6 @@ function initAIResumeAnalyzer() {
         if (foundSkills.length >= 5) score += 10;       // quality bonus
         score = Math.min(score, 100);
 
-        // Derived sub-scores for display
         const formattingScore = Math.round(
             ((eduFound ? 1 : 0) + (expFound ? 1 : 0) + (projFound ? 1 : 0)) / 3 * 100
         );
@@ -252,16 +261,13 @@ function initAIResumeAnalyzer() {
             Math.round((foundSkills.length / SKILLS.length) * 100), 100
         );
 
-        // Strength label
         let strength;
         if      (score >= 80) strength = '✅ Resume Strength: Excellent';
         else if (score >= 50) strength = '👍 Resume Strength: Good';
         else                  strength = '⚠️ Resume Strength: Needs Improvement';
 
-        // Missing skills → suggestions
         const missingSkills = SKILLS.filter(s => !foundSkills.includes(s));
 
-        // ── Render results ────────────────────────────────────────
         renderResults({
             score, formattingScore, keywordScore, strength,
             foundSkills, missingSkills,
@@ -272,21 +278,17 @@ function initAIResumeAnalyzer() {
     function renderResults({ score, formattingScore, keywordScore, strength,
                               foundSkills, missingSkills,
                               eduFound, expFound, projFound }) {
-        // Show panels
         ats.classList.remove('hidden');
         bottomSection.classList.remove('hidden');
 
-        // ATS score circle
         document.getElementById('atsScoreDisplay').textContent  = score + '%';
         document.getElementById('atsFormattingScore').textContent = `✔ Formatting Score: ${formattingScore}%`;
         document.getElementById('atsKeywordScore').textContent    = `✔ Keyword Match: ${keywordScore}%`;
         document.getElementById('atsStrength').textContent        = strength;
 
-        // Keyword bars
         const kwList = document.getElementById('resumeKeywordsList');
         kwList.innerHTML = '';
 
-        // Show found skills first, then a few missing ones grayed out
         const displaySkills = [
             ...foundSkills.map(s => ({ name: s, pct: Math.min(70 + Math.random() * 30 | 0, 100), found: true })),
             ...missingSkills.slice(0, Math.max(0, 5 - foundSkills.length))
@@ -307,7 +309,6 @@ function initAIResumeAnalyzer() {
             });
         }
 
-        // Suggestions
         const suggestionsEl = document.getElementById('resumeSuggestions');
         suggestionsEl.innerHTML = '';
 
@@ -320,7 +321,6 @@ function initAIResumeAnalyzer() {
                 </div>`;
         });
 
-        // Scroll into view
         ats.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
