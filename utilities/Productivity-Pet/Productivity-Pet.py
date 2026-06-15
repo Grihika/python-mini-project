@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime
 
-SAVE_FILE = "save.json"
+SAVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.json")
 
 
 def main():
